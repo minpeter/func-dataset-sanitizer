@@ -50,10 +50,9 @@ def tag_list_parser(data, tag):
 
 def parse_function_calling_json(data):
     parsed_data = {
-        "extra": {k: v for k, v in data.items() if k not in ["conversations"]},
         "parsed": [],
-        "conversations": data["conversations"],
         "tools": None,
+        "extra": {k: v for k, v in data.items()},
     }
 
     for conversation in data["conversations"]:
@@ -95,6 +94,7 @@ def process_jsonl_files(input_file_path, output_file_path, error_file_path):
     """
 
     error_count = 0
+
     try:
         with open(input_file_path, "r", encoding="utf-8") as infile:
             with open(output_file_path, "w", encoding="utf-8") as outfile:
@@ -119,8 +119,9 @@ def process_jsonl_files(input_file_path, output_file_path, error_file_path):
     except Exception as e:
         print(f"An unexpected error occurred during file processing: {e}")
 
+    total_lines = sum(1 for _ in open(input_file_path, "r", encoding="utf-8"))
     print(
-        f"Total lines: {line_num}, Success: {line_num - error_count}, Error: {error_count}"
+        f"Total lines: {total_lines}, Success: {total_lines - error_count}, Error: {error_count}"
     )
 
 
