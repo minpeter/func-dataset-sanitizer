@@ -35,7 +35,7 @@ def modify_data(data_list):
         data_list: 수정할 데이터 리스트. 각 요소는 딕셔너리 형태여야 합니다.
 
     Returns:
-        수정된 데이터 리스트. 각 요소는 {"arguments": {}, "name": ""} 형태의 딕셔너리입니다.
+        수정된 데이터 리스트. 각 요소는 {"name": "", "arguments": {}} 형태의 딕셔너리입니다.
     """
     modified_list = []
     for item in data_list:
@@ -67,13 +67,21 @@ def modify_data(data_list):
                 else:
                     arguments[arg_key] = arg_value  # 리스트가 아니면 그대로 사용
 
-            modified_list.append({"arguments": arguments, "name": key})
+            modified_list.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": key,
+                        "arguments": json.dumps(arguments, ensure_ascii=False),
+                    },
+                }
+            )
     return modified_list
 
 
 def modify_arguments(arg_dict):
     """
-    arguments 딕셔너리를 재귀적으로 처리하는 함수 (현재 문제에서는 깊이 있는 재귀가 필요 없어 보이지만, 확장을 위해 포함)
+    arguments 딕셔너리를 재귀적으로 처리하는 함수
 
     Args:
         arg_dict: arguments 딕셔너리
@@ -85,15 +93,11 @@ def modify_arguments(arg_dict):
     for arg_key, arg_value in arg_dict.items():
         if isinstance(arg_value, list) and arg_value:
             if isinstance(arg_value[0], dict):
-                modified_args[arg_key] = modify_arguments(
-                    arg_value[0]
-                )  # 재귀 호출 (현재 문제에서는 불필요)
+                modified_args[arg_key] = modify_arguments(arg_value[0])
             else:
                 modified_args[arg_key] = arg_value[0]
         elif isinstance(arg_value, dict):
-            modified_args[arg_key] = modify_arguments(
-                arg_value
-            )  # 재귀 호출 (현재 문제에서는 불필요)
+            modified_args[arg_key] = modify_arguments(arg_value)
         else:
             modified_args[arg_key] = arg_value
     return modified_args
@@ -103,18 +107,23 @@ def parse_function_calling_json(input_data, answer_data):
     if input_data["id"] != answer_data["id"]:
         raise ValueError("ID mismatch")
 
+    # Parse function definitions from input_data["functionc"]
+    function_defs = []
+    for func in input_data["function"]:
+        function_defs.append({"type": "function", "function": func})
+
     parsed_data = {
-        "parsed": [
+        "messages": [
             {
-                "from": "human",
-                "value": input_data["question"][0][0]["content"],
+                "role": "user",
+                "content": input_data["question"][0][0]["content"],
             },
             {
-                "from": "gpt",
-                "value": modify_data(answer_data["ground_truth"]),
+                "role": "assistant",
+                "tool_calls": modify_data(answer_data["ground_truth"]),
             },
         ],
-        "tools": input_data["function"],
+        "tools": function_defs,
         "extra": {
             "id": input_data["id"],
         },
@@ -124,10 +133,6 @@ def parse_function_calling_json(input_data, answer_data):
 
 
 def process_jsonl_files(input_file_path, answer_file_path, output_file_path):
-    """
-    Reads a jsonl file, processes each line with parse_function_calling_json,
-    and saves the output to a new jsonl file without indentation.
-    """
 
     error_count = 0
     try:
