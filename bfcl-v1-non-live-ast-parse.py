@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from calendar import c
 import json
 
 
@@ -27,26 +28,76 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-def bfcl_ground_truth_to_json(data):
+def modify_data(data_list):
+    """
+    입력받은 데이터를 특정 형태로 수정하는 함수입니다.
 
-    result = []
-    for idx, fc_call in enumerate(data):
-        key = list(fc_call.keys())[0]
+    Args:
+        data_list: 수정할 데이터 리스트. 각 요소는 딕셔너리 형태여야 합니다.
 
-        args = {}
+    Returns:
+        수정된 데이터 리스트. 각 요소는 {"arguments": {}, "name": ""} 형태의 딕셔너리입니다.
+    """
+    modified_list = []
+    for item in data_list:
+        for key, value in item.items():
+            arguments = {}
+            for arg_key, arg_value in value.items():
+                # 여러번 타고 내려가는 경우를 고려하여 재귀적으로 처리
+                if (
+                    isinstance(arg_value, list) and arg_value
+                ):  # 리스트이고 비어있지 않은 경우 첫번째 요소 사용
+                    if isinstance(
+                        arg_value[0], dict
+                    ):  # 리스트의 첫번째 요소가 딕셔너리인 경우, 다시 재귀적으로 처리 (하지만 이 문제에서는 필요 없을듯)
+                        arguments[arg_key] = modify_arguments(
+                            arg_value[0]
+                        )  # 필요하다면 재귀 호출, 현재 문제에서는 불필요해 보임.
+                    elif arg_value[0] == "":
+                        continue  # 빈 문자열인 경우 무시
+                    else:
+                        arguments[arg_key] = arg_value[0]  # 리스트의 첫번째 요소 사용
+                elif isinstance(
+                    arg_value, dict
+                ):  # 딕셔너리인 경우, 재귀적으로 처리 (하지만 이 문제에서는 필요 없을듯)
+                    arguments[arg_key] = modify_arguments(
+                        arg_value
+                    )  # 필요하다면 재귀 호출, 현재 문제에서는 불필요해 보임.
+                elif arg_value == "":
+                    continue  # 빈 문자열인 경우 무시
+                else:
+                    arguments[arg_key] = arg_value  # 리스트가 아니면 그대로 사용
 
-        for _, value in enumerate(fc_call[key]):
-            # If there is no selection for an optional parameter, provide ""
-            if fc_call[key][value][0] != "":
-                args[value] = fc_call[key][value][0]
+            modified_list.append({"arguments": arguments, "name": key})
+    return modified_list
 
-        result.append(
-            {
-                "function": key,
-                "arguments": args,
-            }
-        )
-    return result
+
+def modify_arguments(arg_dict):
+    """
+    arguments 딕셔너리를 재귀적으로 처리하는 함수 (현재 문제에서는 깊이 있는 재귀가 필요 없어 보이지만, 확장을 위해 포함)
+
+    Args:
+        arg_dict: arguments 딕셔너리
+
+    Returns:
+        수정된 arguments 딕셔너리
+    """
+    modified_args = {}
+    for arg_key, arg_value in arg_dict.items():
+        if isinstance(arg_value, list) and arg_value:
+            if isinstance(arg_value[0], dict):
+                modified_args[arg_key] = modify_arguments(
+                    arg_value[0]
+                )  # 재귀 호출 (현재 문제에서는 불필요)
+            else:
+                modified_args[arg_key] = arg_value[0]
+        elif isinstance(arg_value, dict):
+            modified_args[arg_key] = modify_arguments(
+                arg_value
+            )  # 재귀 호출 (현재 문제에서는 불필요)
+        else:
+            modified_args[arg_key] = arg_value
+    return modified_args
 
 
 def parse_function_calling_json(input_data, answer_data):
@@ -61,7 +112,7 @@ def parse_function_calling_json(input_data, answer_data):
             },
             {
                 "from": "gpt",
-                "value": bfcl_ground_truth_to_json(answer_data["ground_truth"]),
+                "value": modify_data(answer_data["ground_truth"]),
             },
         ],
         "tools": input_data["function"],
