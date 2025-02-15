@@ -18,17 +18,22 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-def hermes_system_parser(data):
-    tools_pattern = re.compile(r"<tools>\n(.*?)\n</tools>", re.DOTALL)
-    tools_match = tools_pattern.search(data)
+def hermes_system_parser(data, tools_entry):
+    try:
 
-    if not tools_match:
-        return None
+        tools_pattern = re.compile(r"<tools>\n(.*?)\n</tools>", re.DOTALL)
+        tools_match = tools_pattern.search(data)
 
-    data_string = tools_match.group(1)
-    parsed_data = ast.literal_eval(data_string)
+        data_string = tools_match.group(1)
 
-    return parsed_data
+        parsed_data = ast.literal_eval(data_string)
+        return parsed_data
+
+    except Exception as e:
+        try:
+            return ast.literal_eval(tools_entry)
+        except Exception as e:
+            return json.loads(tools_entry)
 
 
 def tag_list_parser(data, tag):
@@ -50,39 +55,62 @@ def tag_list_parser(data, tag):
 
 def parse_function_calling_json(data):
     parsed_data = {
-        "parsed": [],
+        "messages": [],
         "tools": None,
-        "extra": {k: v for k, v in data.items()},
+        "extra": {k: v for k, v in data.items() if k not in ["conversations", "tools"]},
     }
 
     for conversation in data["conversations"]:
         data_from, data_value = conversation["from"], conversation["value"]
+
         if data_from == "system":
-            tools_data = hermes_system_parser(data_value)
+            # tools 필드가 있는지 확인하고 있다면 넘기기
+            if "tools" in data:
+                tools_data = hermes_system_parser(data_value, data["tools"])
+            else:
+                tools_data = hermes_system_parser(data_value, None)
             parsed_data["tools"] = tools_data
 
         parsed_conversation = {
-            "from": conversation["from"],
-            "value": conversation["value"],
+            "role": data_from,
+            "content": data_value,
         }
 
-        if conversation["from"] == "gpt":
-            if conversation["value"].startswith("<tool_call>"):
-                parsed_conversation["value"] = tag_list_parser(data_value, "tool_call")
-            else:
-                parsed_conversation["value"] = data_value
+        if data_from == "human":
+            parsed_conversation["role"] = "user"
 
-        if conversation["from"] == "tool":
-            # parsed_conversation["value"] = tag_list_parser(data_value, "tool_response")
-            if data_value.startswith("<tool_response>"):
-                parsed_conversation["value"] = tag_list_parser(
-                    data_value, "tool_response"
-                )
-            else:
-                parsed_conversation["value"] = data_value
+        if data_from == "gpt":
+            parsed_conversation["role"] = "assistant"
+            if data_value.startswith("<tool_call>"):
 
-        if conversation["from"] != "system":
-            parsed_data["parsed"].append(parsed_conversation)
+                parse_data = tag_list_parser(data_value, "tool_call")
+
+                tool_calls = []
+                for tool_call in parse_data:
+
+                    tool_calls.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool_call["name"],
+                                "arguments": json.dumps(
+                                    tool_call["arguments"], ensure_ascii=False
+                                ),
+                            },
+                        }
+                    )
+
+                parsed_conversation["content"] = tool_calls
+            else:
+                parsed_conversation["content"] = data_value
+
+        if data_from == "tool":
+            parse_data = tag_list_parser(data_value, "tool_response")
+
+            parsed_conversation["content"] = json.dumps(parse_data, ensure_ascii=False)
+
+        if data_from != "system":
+            parsed_data["messages"].append(parsed_conversation)
 
     return parsed_data
 
