@@ -90,12 +90,7 @@ def parse_api_list_text_to_json_list(api_list_text):
     """
     api_list_text = api_list_text.strip()
     if not api_list_text.startswith("[") or not api_list_text.endswith("]"):
-        print(
-            "경고: 입력 텍스트가 '['와 ']'로 시작하고 끝나지 않습니다. 전체 텍스트를 하나의 API 호출로 처리합니다."
-        )
-        # 괄호가 없으면, 전체 텍스트를 하나의 API 호출로 처리 시도 (오류를 최대한 방지)
-        parsed_api = parse_api_text_to_json(api_list_text)
-        return [parsed_api] if parsed_api else []  # 파싱 실패 시 빈 리스트 반환
+        raise ValueError("Invalid API list text format")
 
     api_list_text = api_list_text[1:-1]  # Remove brackets
     api_texts = api_list_text.split(
