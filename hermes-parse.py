@@ -96,9 +96,24 @@ def parse_function_calling_json(data):
 
         if data_from == "tool":
             parse_data = tag_list_parser(data_value, "tool_response")
-            parsed_conversation["content"] = json.dumps(parse_data, ensure_ascii=False)
+            for tool in parse_data:
 
-        if data_from != "system":
+                if "name" in tool and "content" in tool:
+                    parsed_data["messages"].append(
+                        {
+                            "role": "tool",
+                            "name": tool["name"],
+                            "content": json.dumps(tool["content"], ensure_ascii=False),
+                        }
+                    )
+                else:
+                    parsed_data["messages"].append(
+                        {
+                            "role": "tool",
+                            "content": json.dumps(tool, ensure_ascii=False),
+                        }
+                    )
+        elif data_from != "system":
             parsed_data["messages"].append(parsed_conversation)
 
     return parsed_data
@@ -131,6 +146,9 @@ for target_file in target_files:
             print(f"Idx: {idx}, Error: {e}")
 
     output_df = pd.DataFrame(output)
+
+    # for debugging
+    # print(output_df.iloc[0].to_json(indent=2))
 
     # Since each tool has different properties, convert to string to meet the requirements of parquet.
     output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
