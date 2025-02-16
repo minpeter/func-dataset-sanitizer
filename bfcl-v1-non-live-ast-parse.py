@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 import json
 import pandas as pd
 from datasets import Dataset
+from libs.utils import func_name_sanitizer
 
 args_parser = ArgumentParser()
 args_parser.add_argument(
@@ -48,7 +49,7 @@ def modify_data(data_list):
                 {
                     "type": "function",
                     "function": {
-                        "name": key,
+                        "name": func_name_sanitizer(key),
                         "arguments": json.dumps(arguments, ensure_ascii=False),
                     },
                 }
@@ -77,7 +78,14 @@ def parse_function_calling_json(input_data, answer_data):
 
     function_defs = []
     for func in input_data["function"]:
-        function_defs.append({"type": "function", "function": func})
+
+        func["name"] = func_name_sanitizer(func["name"])
+        function_defs.append(
+            {
+                "type": "function",
+                "function": func,
+            }
+        )
 
     parsed_data = {
         "messages": [
@@ -109,9 +117,9 @@ def process_jsonl_files(input_file_path, answer_file_path, output_file_path):
                         input_data = json.loads(input_line.strip())
                         answer_data = json.loads(answer_line.strip())
 
-                        if args.debug:
-                            print("Input Data:", input_data)
-                            print("Answer Data:", answer_data)
+                        # if args.debug:
+                        #     print("Input Data:", input_data)
+                        #     print("Answer Data:", answer_data)
 
                         parsed_data = parse_function_calling_json(
                             input_data, answer_data
@@ -131,6 +139,11 @@ def process_jsonl_files(input_file_path, answer_file_path, output_file_path):
         print(f"An unexpected error occurred during file processing: {e}")
 
     df = pd.DataFrame(parsed_list)
+
+    # for debugging
+    if args.debug:
+        print(df.iloc[0].to_json(indent=2))
+
     df["tools"] = df["tools"].apply(lambda x: json.dumps(x))
 
     dataset = Dataset.from_pandas(df)
