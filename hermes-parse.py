@@ -45,15 +45,19 @@ def parse_function_calling_json(data):
         "extra": {k: v for k, v in data.items() if k not in ["conversations", "tools"]},
     }
 
+    if "id" in data and data["id"] == "e39781a4-29a3-4896-83d2-0ab5d264b6ed":
+        raise Exception("Skip this data")
+
     for conversation in data["conversations"]:
         data_from, data_value = conversation["from"], conversation["value"]
 
         if data_from == "system":
             if "tools" in data:
+                # handle glaive function dataset
                 tools_data = hermes_system_parser(data_value, data["tools"])
             else:
-                # handle glaive function dataset
                 tools_data = hermes_system_parser(data_value, None)
+
             parsed_data["tools"] = tools_data
 
         parsed_conversation = {
@@ -117,15 +121,27 @@ for target_file in target_files:
     )
 
     output = []
+    error = []
 
     for idx, data in enumerate(input_ds["train"]):
-        if idx > 0:
-            break
-
-        output.append(parse_function_calling_json(data))
+        try:
+            output.append(parse_function_calling_json(data))
+        except Exception as e:
+            error.append(data)
+            print(f"Idx: {idx}, Error: {e}")
 
     output_df = pd.DataFrame(output)
+
+    # Since each tool has different properties, convert to string to meet the requirements of parquet.
+    output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
+
     dataset = Dataset.from_pandas(output_df)
 
     output_file_path = f"./parsed/{target_file.split('.')[0]}.parquet"
     dataset.to_parquet(output_file_path)
+
+    print(
+        f"Total lines: {
+            len(input_ds['train'])
+        }, Success: {len(output)}, Error: {len(error)}"
+    )
