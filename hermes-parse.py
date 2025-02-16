@@ -1,21 +1,6 @@
-from argparse import ArgumentParser
 import json, re, ast
-
-
-parser = ArgumentParser()
-parser.add_argument(
-    "-f", "--file", "--filename", help="Input file name", dest="filename", required=True
-)
-
-parser.add_argument(
-    "-d",
-    "--debug",
-    help="Debug mode",
-    dest="debug",
-    action="store_true",
-)
-
-args = parser.parse_args()
+from datasets import Dataset, load_dataset
+import pandas as pd
 
 
 def hermes_system_parser(data, tools_entry):
@@ -64,30 +49,31 @@ def parse_function_calling_json(data):
         data_from, data_value = conversation["from"], conversation["value"]
 
         if data_from == "system":
-            # tools 필드가 있는지 확인하고 있다면 넘기기
             if "tools" in data:
                 tools_data = hermes_system_parser(data_value, data["tools"])
             else:
+                # handle glaive function dataset
                 tools_data = hermes_system_parser(data_value, None)
             parsed_data["tools"] = tools_data
 
         parsed_conversation = {
-            "role": data_from,
-            "content": data_value,
+            "role": None,
+            "content": None,
+            "tool_calls": None,
         }
 
         if data_from == "human":
             parsed_conversation["role"] = "user"
+            parsed_conversation["content"] = data_value
 
         if data_from == "gpt":
             parsed_conversation["role"] = "assistant"
-            if data_value.startswith("<tool_call>"):
 
+            if data_value.startswith("<tool_call>"):
                 parse_data = tag_list_parser(data_value, "tool_call")
 
                 tool_calls = []
                 for tool_call in parse_data:
-
                     tool_calls.append(
                         {
                             "type": "function",
@@ -100,13 +86,12 @@ def parse_function_calling_json(data):
                         }
                     )
 
-                parsed_conversation["content"] = tool_calls
+                parsed_conversation["tool_calls"] = tool_calls
             else:
                 parsed_conversation["content"] = data_value
 
         if data_from == "tool":
             parse_data = tag_list_parser(data_value, "tool_response")
-
             parsed_conversation["content"] = json.dumps(parse_data, ensure_ascii=False)
 
         if data_from != "system":
@@ -115,46 +100,32 @@ def parse_function_calling_json(data):
     return parsed_data
 
 
-def process_jsonl_files(input_file_path, output_file_path, error_file_path):
-    """
-    Reads a jsonl file, processes each line with parse_function_calling_json,
-    and saves the output to a new jsonl file without indentation.
-    """
+target_files = [
+    "func-calling.json",
+    "func-calling-singleturn.json",
+    "glaive-function-calling-5k.json",
+]
 
-    error_count = 0
-
-    try:
-        with open(input_file_path, "r", encoding="utf-8") as infile:
-            with open(output_file_path, "w", encoding="utf-8") as outfile:
-                with open(error_file_path, "w", encoding="utf-8") as errorfile:
-                    for line_num, line in enumerate(infile, 1):
-                        try:
-                            data = json.loads(line.strip())
-                            parsed_data = parse_function_calling_json(data)
-
-                            json.dump(parsed_data, outfile, ensure_ascii=False)
-                            outfile.write("\n")
-                        except Exception as e:
-                            if args.debug:
-                                print(f"Error in line {line_num}: {e}")
-                            error_count += 1
-                            errorfile.write(line)
-
-    except FileNotFoundError:
-        print(
-            f"Error: File not found at {input_file_path} or {output_file_path} or {error_file_path}"
-        )
-    except Exception as e:
-        print(f"An unexpected error occurred during file processing: {e}")
-
-    total_lines = sum(1 for _ in open(input_file_path, "r", encoding="utf-8"))
-    print(
-        f"Total lines: {total_lines}, Success: {total_lines - error_count}, Error: {error_count}"
+for target_file in target_files:
+    input_ds = load_dataset(
+        "NousResearch/hermes-function-calling-v1",
+        data_files={
+            "train": [
+                target_file,
+            ]
+        },
     )
 
+    output = []
 
-input_file = args.filename
-output_file = "./parsed/" + input_file.split(".")[0] + "-parsed.jsonl"
-error_file = "./parsed/" + input_file.split(".")[0] + "-error.jsonl"
+    for idx, data in enumerate(input_ds["train"]):
+        if idx > 0:
+            break
 
-process_jsonl_files(input_file, output_file, error_file)
+        output.append(parse_function_calling_json(data))
+
+    output_df = pd.DataFrame(output)
+    dataset = Dataset.from_pandas(output_df)
+
+    output_file_path = f"./parsed/{target_file.split('.')[0]}.parquet"
+    dataset.to_parquet(output_file_path)
