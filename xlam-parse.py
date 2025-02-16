@@ -1,36 +1,47 @@
-from argparse import ArgumentParser
-import json, re, ast
-
-
-parser = ArgumentParser()
-parser.add_argument(
-    "-f", "--file", "--filename", help="Input file name", dest="filename", required=True
-)
-
-parser.add_argument(
-    "-d",
-    "--debug",
-    help="Debug mode",
-    dest="debug",
-    action="store_true",
-)
-
-args = parser.parse_args()
+import json
+from datasets import Dataset, load_dataset
+import pandas as pd
 
 
 def parse_function_calling_json(data):
+
+    answers = json.loads(data["answers"])
+    tool_calls = []
+    for answer in answers:
+        tool_calls.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": answer["name"],
+                    "arguments": json.dumps(answer["arguments"], ensure_ascii=False),
+                },
+            }
+        )
+
+    tools = []
+    for tool in json.loads(data["tools"]):
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": tool["parameters"],
+                    },
+                },
+            }
+        )
+
     parsed_data = {
-        "parsed": [
+        "messages": [
             {
-                "from": "human",
-                "value": data["query"],
+                "role": "user",
+                "content": data["query"],
             },
-            {
-                "from": "gpt",
-                "value": json.loads(data["answers"]),
-            },
+            {"role": "assistant", "tool_calls": tool_calls},
         ],
-        "tools": json.loads(data["tools"]),
+        "tools": tools,
         "extra": {
             "id": data["id"],
         },
@@ -39,39 +50,38 @@ def parse_function_calling_json(data):
     return parsed_data
 
 
-def process_jsonl_files(input_file_path, output_file_path):
-    """
-    Reads a jsonl file, processes each line with parse_function_calling_json,
-    and saves the output to a new jsonl file without indentation.
-    """
+repo = "Salesforce/xlam-function-calling-60k"
+input_ds = load_dataset(repo)
 
-    error_count = 0
+
+output = []
+error = []
+
+for idx, data in enumerate(input_ds["train"]):
+    # for debugging
+    # if idx > 0:
+    #     break
     try:
-        with open(input_file_path, "r", encoding="utf-8") as infile:
-            with open(output_file_path, "w", encoding="utf-8") as outfile:
-                for line_num, line in enumerate(infile, 1):
-                    try:
-                        data = json.loads(line.strip())
-                        parsed_data = parse_function_calling_json(data)
-
-                        json.dump(parsed_data, outfile, ensure_ascii=False)
-                        outfile.write("\n")
-                    except Exception as e:
-                        if args.debug:
-                            print(f"Error in line {line_num}: {e}")
-
-    except FileNotFoundError:
-        print(f"Error: File not found at {input_file_path} or {output_file_path}")
+        output.append(parse_function_calling_json(data))
     except Exception as e:
-        print(f"An unexpected error occurred during file processing: {e}")
+        error.append(data)
+        print(f"Idx: {idx}, Error: {e}")
 
-    total_lines = sum(1 for _ in open(input_file_path, "r", encoding="utf-8"))
-    print(
-        f"Total lines: {total_lines}, Success: {total_lines - error_count}, Error: {error_count}"
-    )
+output_df = pd.DataFrame(output)
 
+# Since each tool has different properties, convert to string to meet the requirements of parquet.
+output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
 
-input_file = args.filename
-output_file = "./parsed/" + input_file.split(".")[0] + "-parsed.jsonl"
+# for debugging
+# print(output_df.iloc[0].to_json(indent=2))
 
-process_jsonl_files(input_file, output_file)
+dataset = Dataset.from_pandas(output_df)
+
+output_file_path = f"./parsed/{repo.split('/')[1]}.parquet"
+dataset.to_parquet(output_file_path)
+
+print(
+    f"Total lines: {
+        len(input_ds['train'])
+    }, Success: {len(output)}, Error: {len(error)}"
+)
