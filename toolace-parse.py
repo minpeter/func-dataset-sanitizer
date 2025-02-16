@@ -1,21 +1,7 @@
-from argparse import ArgumentParser
-import json, re, ast
-
-
-parser = ArgumentParser()
-parser.add_argument(
-    "-f", "--file", "--filename", help="Input file name", dest="filename", required=True
-)
-
-parser.add_argument(
-    "-d",
-    "--debug",
-    help="Debug mode",
-    dest="debug",
-    action="store_true",
-)
-
-args = parser.parse_args()
+import json, re
+from datasets import Dataset, load_dataset
+import pandas as pd
+from sympy import N
 
 
 def toolace_system_parser(data):
@@ -35,7 +21,22 @@ def toolace_system_parser(data):
 
     parsed_data = json.loads(data_string)
 
-    return parsed_data
+    tools = []
+
+    for tool in parsed_data:
+
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["parameters"],
+                },
+            }
+        )
+
+    return tools
 
 
 def parse_api_text_to_json(api_text):
@@ -118,73 +119,91 @@ def parse_function_calling_json(data):
 
     for conversation in data["conversations"]:
 
+        from_data, value_data = conversation["from"], conversation["value"]
+
         parsed_conversation = {
-            "from": conversation["from"],
-            "value": conversation["value"],
+            "role": from_data,
+            "content": value_data,
         }
 
-        if conversation["from"] == "assistant":
-            if conversation["value"].startswith("["):
-                parsed_conversation["value"] = parse_api_list_text_to_json_list(
-                    conversation["value"]
-                )
+        if from_data == "assistant":
+            if value_data.startswith("["):
+
+                tool_parse = parse_api_list_text_to_json_list(value_data)
+
+                tool_calls = []
+
+                for tool in tool_parse:
+                    tool_calls.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool["name"],
+                                "arguments": json.dumps(
+                                    tool["arguments"], ensure_ascii=False
+                                ),
+                            },
+                        }
+                    )
+
+                parsed_conversation["tool_calls"] = tool_calls
+                parsed_conversation["content"] = None
             else:
-                parsed_conversation["value"] = conversation["value"]
+                parsed_conversation["content"] = value_data
 
-        if conversation["from"] == "tool":
-            parsed_conversation["value"] = json.loads(conversation["value"])
-
-        parsed.append(parsed_conversation)
+        if from_data == "tool":
+            for calls in json.loads(value_data):
+                parsed.append(
+                    {
+                        "role": "tool",
+                        "name": calls["name"],
+                        "content": json.dumps(calls["results"], ensure_ascii=False),
+                    }
+                )
+        else:
+            parsed.append(parsed_conversation)
 
     parsed_data = {
-        "parsed": parsed,
+        "messages": parsed,
         "tools": toolace_system_parser(data["system"]),
-        "extra": {k: v for k, v in data.items()},
+        "extra": None,
     }
 
     return parsed_data
 
 
-def process_jsonl_files(input_file_path, output_file_path, error_file_path):
-    """
-    Reads a jsonl file, processes each line with parse_function_calling_json,
-    and saves the output to a new jsonl file without indentation.
-    """
+repo = "Team-ACE/ToolACE"
+input_ds = load_dataset(repo)
 
-    error_count = 0
 
+output = []
+error = []
+
+for idx, data in enumerate(input_ds["train"]):
+    # for debugging
+    # if idx > 0:
+    #     break
     try:
-        with open(input_file_path, "r", encoding="utf-8") as infile:
-            with open(output_file_path, "w", encoding="utf-8") as outfile:
-                with open(error_file_path, "w", encoding="utf-8") as errorfile:
-                    for line_num, line in enumerate(infile, 1):
-                        try:
-                            data = json.loads(line.strip())
-                            parsed_data = parse_function_calling_json(data)
-
-                            json.dump(parsed_data, outfile, ensure_ascii=False)
-                            outfile.write("\n")
-                        except Exception as e:
-                            if args.debug:
-                                print(f"Error in line {line_num}: {e}")
-                            error_count += 1
-                            errorfile.write(line)
-
-    except FileNotFoundError:
-        print(
-            f"Error: File not found at {input_file_path} or {output_file_path} or {error_file_path}"
-        )
+        output.append(parse_function_calling_json(data))
     except Exception as e:
-        print(f"An unexpected error occurred during file processing: {e}")
+        error.append(data)
+        print(f"Idx: {idx}, Error: {e}")
 
-    total_lines = sum(1 for _ in open(input_file_path, "r", encoding="utf-8"))
-    print(
-        f"Total lines: {total_lines}, Success: {total_lines - error_count}, Error: {error_count}"
-    )
+output_df = pd.DataFrame(output)
 
+# Since each tool has different properties, convert to string to meet the requirements of parquet.
+output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
 
-input_file = args.filename
-output_file = "./parsed/" + input_file.split(".")[0] + "-parsed.jsonl"
-error_file = "./parsed/" + input_file.split(".")[0] + "-error.jsonl"
+# for debugging
+# print(output_df.iloc[0].to_json(indent=2))
 
-process_jsonl_files(input_file, output_file, error_file)
+dataset = Dataset.from_pandas(output_df)
+
+output_file_path = f"./parsed/{repo.split('/')[1].lower()}.parquet"
+dataset.to_parquet(output_file_path)
+
+print(
+    f"Total lines: {
+        len(input_ds['train'])
+    }, Success: {len(output)}, Error: {len(error)}"
+)
