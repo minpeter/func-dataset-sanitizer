@@ -31,6 +31,8 @@ model_id = os.getenv("FRIENDLI_EID")
 
 
 def parse_function_calling_json(data):
+
+    tools_list = json.loads(data["tools"])
     system_prompt = """A dataset of tools that are not related to the user's query is provided one line at a time. First, consider whether the user's question is really not related to the given tool, and if not, respond that it cannot be processed. This is a task to fill the response of the unrelated dataset.
 If some of the user's requests can be processed by calling a function and some cannot be processed, respond that some tasks can be processed but the entire request cannot be processed instead of calling a function.
     -----
@@ -45,31 +47,25 @@ Format tool calls strictly as:
 
 If no tool is relevant or required parameters are missing, state that you cannot process the request. Do not use insider knowledge or hallucinate.  If you decline, briefly explain why.
 Available tools: """ + json.dumps(
-        data["tools"], indent=4
+        tools_list
     )
 
-    tools = json.loads(data["tools"])
+    response = client.chat.completions.create(
+        model=model_id,
+        n=1,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": data["query"]},
+        ],
+    )
 
-    if not data["tools"]:
-        response = client.chat.completions.create(
-            model=model_id,
-            n=1,
-            messages=[
-                {"role": "user", "content": data["query"]},
-            ],
-        )
-    else:
-        response = client.chat.completions.create(
-            model=model_id,
-            n=1,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": data["query"]},
-            ],
-        )
+    llm_resp = response.choices[0].message.content
+
+    if "tool_call" in llm_resp:
+        raise Exception("Failed to generate tool calls")
 
     tools = []
-    for tool in tools:
+    for tool in tools_list:
         tools.append(
             {
                 "type": "function",
@@ -82,11 +78,6 @@ Available tools: """ + json.dumps(
                 },
             }
         )
-
-    llm_resp = response.choices[0].message.content
-
-    if "tool_call" in llm_resp:
-        raise Exception("Failed to generate tool calls")
 
     parsed_data = {
         "messages": [
@@ -110,9 +101,13 @@ input_ds = load_dataset(repo)
 
 
 def process_item(data):
+    if len(json.loads(data["tools"])) == 0:
+        print("No tools available")
+        return {"success": False, "data": data, "error": "No tools available"}
     try:
         return {"success": True, "data": parse_function_calling_json(data)}
     except Exception as e:
+        print(f"Error: {str(e)}")
         return {"success": False, "data": data, "error": str(e)}
 
 
@@ -133,6 +128,9 @@ for idx, result in enumerate(results):
         print(f"Idx: {idx}, Error: {result['error']}")
 
 output_df = pd.DataFrame(output)
+
+print(output_df.head())
+
 output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
 
 dataset = Dataset.from_pandas(output_df)
