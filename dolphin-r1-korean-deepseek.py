@@ -518,7 +518,7 @@ if 1273 in output_df.index:
 output_df["tools"] = output_df["tools"].apply(
     lambda x: json.dumps(x, ensure_ascii=False)
 )
-reasoning_ds = Dataset.from_pandas(output_df)
+reasoning_ds = Dataset.from_pandas(output_df, preserve_index=False)
 output_rfile_path = "./parsed/dolphin-r1-korean-deepseek.parquet"
 reasoning_ds.to_parquet(output_rfile_path)
 
