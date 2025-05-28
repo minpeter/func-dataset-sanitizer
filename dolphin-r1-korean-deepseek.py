@@ -41,7 +41,7 @@ def parse_function_calling_json(data):
     parsed_data = {
         "messages": [],
         "tools": None,
-        "extra": {}
+        "extra": None,
     }
     for conversation in data["messages"]:
         data_role, data_content, data_translated_content = conversation["role"], conversation["content"], conversation.get("translated_content", None)
@@ -97,7 +97,7 @@ def parse_function_calling_json(data):
             parsed_data["messages"].append({
                 "role": "assistant",
                 "tool_calls": tool_calls,
-                "reasoning_content": reasoning_parser(data_translated_content)
+                # "reasoning_content": reasoning_parser(data_translated_content)
             })
         else:
             # print(f"user: {data_translated_content}")
@@ -129,64 +129,92 @@ for idx, data in enumerate(input_ds["train"]):
         error.append(data)
         print(f"Idx: {idx}, Error: {e}")
 
-# 기존 output_df 생성 및 저장 로직을 row 단위 try-except로 변경
 
-valid_output = []
-invalid_indices = []
-for idx, row in enumerate(output):
-    try:
-        # tools 컬럼 처리
-        row_copy = row.copy()
-        if "tools" not in row_copy:
-            row_copy["tools"] = None
-        row_copy["tools"] = json.dumps(row_copy["tools"], ensure_ascii=False) if row_copy["tools"] is not None else "null"
-        # extra 컬럼 처리
-        if "extra" in row_copy and isinstance(row_copy["extra"], dict) and not row_copy["extra"]:
-            row_copy["extra"] = None
-        valid_output.append(row_copy)
-    except Exception as e:
-        print(f"Row {idx} 저장 변환 중 에러: {e}")
-        invalid_indices.append(idx)
-        error.append({"idx": idx, "error": str(e)})
+output_df = pd.DataFrame(output)
 
-if not valid_output:
-    print("Warning: 저장 가능한 row가 없습니다.")
-else:
-    try:
-        output_df = pd.DataFrame(valid_output)
-        dataset = Dataset.from_pandas(output_df)
-        # output_file_path = f"./parsed/dolphin-r1-korean-deepseek.parquet"
-        # dataset.to_parquet(output_file_path)
-    except Exception as e:
-        print(f"DataFrame을 Dataset으로 변환 중 에러: {e}")
-        error.append({"idx": "DataFrame_to_Dataset", "error": str(e)})
+# output_df에서 1273번 row drop
+if 1273 in output_df.index:
+    output_df = output_df.drop(index=1273)
 
-output_jsonl_path = f"./parsed/dolphin-r1-korean-deepseek.jsonl"
-output_non_reasoning_jsonl_path = f"./parsed/dolphin-r1-korean-deepseek-non-reasoning.jsonl"
+# for debugging
+# print(output_df.iloc[0].to_json(indent=2))
 
-with open(output_jsonl_path, "w", encoding="utf-8") as f_reasoning, \
-     open(output_non_reasoning_jsonl_path, "w", encoding="utf-8") as f_non_reasoning:
-    for idx, row in enumerate(output):
-        if idx in invalid_indices:
-            continue
-        try:
-            # 저장: reasoning 포함
-            f_reasoning.write(json.dumps(row, ensure_ascii=False) + "\n")
-            # 저장: reasoning 미포함 (reasoning_content 필드 제거)
-            row_non_reasoning = json.loads(json.dumps(row, ensure_ascii=False))
-            if "messages" in row_non_reasoning:
-                for msg in row_non_reasoning["messages"]:
-                    if "reasoning_content" in msg:
-                        del msg["reasoning_content"]
-            f_non_reasoning.write(json.dumps(row_non_reasoning, ensure_ascii=False) + "\n")
-        except Exception as e:
-            print(f"Row {idx} JSONL 저장 중 에러: {e}")
-            error.append({"idx": idx, "error": str(e)})
+# Since each tool has different properties, convert to string to meet the requirements of parquet.
+output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
+
+# __index_level_0__ 컬럼 제거
+if "__index_level_0__" in output_df.columns:
+    output_df = output_df.drop(columns="__index_level_0__")
+
+dataset = Dataset.from_pandas(output_df)
+
+output_file_path = f"./parsed/dolphin-r1-korean-deepseek-non-reasoning.parquet"
+dataset.to_parquet(output_file_path)
 
 print(
-    f"Total lines: {len(input_ds['train'])}, Success: {len(valid_output)}, Error: {len(error)}"
+    f"Total lines: {
+    len(input_ds['train'])
+    }, Success: {len(output)}, Error: {len(error)}"
 )
-if error:
-    print("Error details:")
-    for err in error:
-        print(f"Idx: {err['idx']}, Error: {err['error']}")
+
+# 기존 output_df 생성 및 저장 로직을 row 단위 try-except로 변경
+
+# valid_output = []
+# invalid_indices = []
+# for idx, row in enumerate(output):
+#     try:
+#         # tools 컬럼 처리
+#         row_copy = row.copy()
+#         if "tools" not in row_copy:
+#             row_copy["tools"] = None
+#         row_copy["tools"] = json.dumps(row_copy["tools"], ensure_ascii=False) if row_copy["tools"] is not None else "null"
+#         # extra 컬럼 처리
+#         if "extra" in row_copy and isinstance(row_copy["extra"], dict) and not row_copy["extra"]:
+#             row_copy["extra"] = None
+#         valid_output.append(row_copy)
+#     except Exception as e:
+#         print(f"Row {idx} 저장 변환 중 에러: {e}")
+#         invalid_indices.append(idx)
+#         error.append({"idx": idx, "error": str(e)})
+
+# if not valid_output:
+#     print("Warning: 저장 가능한 row가 없습니다.")
+# else:
+#     try:
+#         output_df = pd.DataFrame(valid_output)
+#         dataset = Dataset.from_pandas(output_df)
+#         # output_file_path = f"./parsed/dolphin-r1-korean-deepseek.parquet"
+#         # dataset.to_parquet(output_file_path)
+#     except Exception as e:
+#         print(f"DataFrame을 Dataset으로 변환 중 에러: {e}")
+#         error.append({"idx": "DataFrame_to_Dataset", "error": str(e)})
+
+# output_jsonl_path = f"./parsed/dolphin-r1-korean-deepseek.jsonl"
+# output_non_reasoning_jsonl_path = f"./parsed/dolphin-r1-korean-deepseek-non-reasoning.jsonl"
+
+# with open(output_jsonl_path, "w", encoding="utf-8") as f_reasoning, \
+#      open(output_non_reasoning_jsonl_path, "w", encoding="utf-8") as f_non_reasoning:
+#     for idx, row in enumerate(output):
+#         if idx in invalid_indices:
+#             continue
+#         try:
+#             # 저장: reasoning 포함
+#             f_reasoning.write(json.dumps(row, ensure_ascii=False) + "\n")
+#             # 저장: reasoning 미포함 (reasoning_content 필드 제거)
+#             row_non_reasoning = json.loads(json.dumps(row, ensure_ascii=False))
+#             if "messages" in row_non_reasoning:
+#                 for msg in row_non_reasoning["messages"]:
+#                     if "reasoning_content" in msg:
+#                         del msg["reasoning_content"]
+#             f_non_reasoning.write(json.dumps(row_non_reasoning, ensure_ascii=False) + "\n")
+#         except Exception as e:
+#             print(f"Row {idx} JSONL 저장 중 에러: {e}")
+#             error.append({"idx": idx, "error": str(e)})
+
+# print(
+#     f"Total lines: {len(input_ds['train'])}, Success: {len(valid_output)}, Error: {len(error)}"
+# )
+# if error:
+#     print("Error details:")
+#     for err in error:
+#         print(f"Idx: {err['idx']}, Error: {err['error']}")
