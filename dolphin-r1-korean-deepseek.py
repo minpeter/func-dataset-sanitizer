@@ -1,5 +1,6 @@
 # Original dataset: https://huggingface.co/datasets/cognitivecomputations/dolphin-r1/viewer/reasoning-deepseek/train
 # Translated Korean dataset: exp-models/dolphin-r1-korean-deepseek-toolcalls
+from jsondiff import diff
 
 import logging
 import os
@@ -14,16 +15,18 @@ from typing import Any, Union, Optional, Dict, List
 from pydantic import TypeAdapter
 
 
-
 # 환경변수에서 로깅 레벨 읽기 (없으면 'INFO' 기본값)
 loglevel = os.getenv("LOGLEVEL", "INFO").upper()
 
 # 문자열을 실제 로깅 레벨 상수로 변환
 numeric_level = getattr(logging, loglevel, logging.INFO)
 
-logging.basicConfig(level=numeric_level, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=numeric_level, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 logger = logging.getLogger(__name__)
+
 
 def python_type_to_json_schema(python_type: str, test: str) -> dict:
     """
@@ -46,10 +49,10 @@ def python_type_to_json_schema(python_type: str, test: str) -> dict:
     # Remove trailing incomplete brackets (e.g., Tuple[float)
     def fix_brackets(tp: str) -> str:
         # If there are more '[' than ']', add missing ']'
-        n_open = tp.count('[')
-        n_close = tp.count(']')
+        n_open = tp.count("[")
+        n_close = tp.count("]")
         if n_open > n_close:
-            tp = tp + (']' * (n_open - n_close))
+            tp = tp + ("]" * (n_open - n_close))
         return tp
 
     # Remove whitespace and handle common cases
@@ -144,6 +147,7 @@ def parse_type(type_str: str):
     except Exception as e:
         raise ValueError(f"Type parsing error: {type_str} ({e})")
 
+
 # 값과 타입 객체를 받아서 재귀적으로 캐스팅
 def cast_value(value, type_obj):
     origin = typing.get_origin(type_obj)
@@ -201,7 +205,9 @@ def cast_value(value, type_obj):
         val_type = args[1] if len(args) > 1 else Any
         if not isinstance(value, dict):
             return {}
-        return {cast_value(k, key_type): cast_value(v, val_type) for k, v in value.items()}
+        return {
+            cast_value(k, key_type): cast_value(v, val_type) for k, v in value.items()
+        }
 
     # Any
     if type_obj is Any:
@@ -209,6 +215,7 @@ def cast_value(value, type_obj):
 
     # fallback
     return value
+
 
 # 통합 함수: 타입 문자열과 값을 받아서 캐스팅
 def cast_with_type_str(value, type_str: str):
@@ -255,10 +262,16 @@ def type2_tool_definition_conv(parameters: dict):
         if "default" in value and json_schema is not None:
             cast_value = cast_with_type_str(value["default"], base_type)
             if type(cast_value) != type(value["default"]):
-                logger.info(f"Default value for {key} changed from {type(value['default'])} to {type(cast_value)} due to type casting.")
-                logger.info(f"Original value: {value['default']}, Casted value: {cast_value}")
+                logger.info(
+                    f"Default value for {key} changed from {type(value['default'])} to {type(cast_value)} due to type casting."
+                )
+                logger.info(
+                    f"Original value: {value['default']}, Casted value: {cast_value}"
+                )
                 if str(cast_value) != str(value["default"]):
-                    logger.warning(f"뭔가 사람이 보기에 값이 달라진거 같다고 생각함, PASS")
+                    logger.warning(
+                        f"뭔가 사람이 보기에 값이 달라진거 같다고 생각함, PASS"
+                    )
                 elif cast_value is not None:
                     logger.info("적절해보임. 케스팅되었고, default 값을 설정함.")
                     new_value["default"] = cast_value
@@ -270,6 +283,7 @@ def type2_tool_definition_conv(parameters: dict):
         if not any("optional" == t for t in type_parts[1:]):
             required.append(key)
     return new_properties, required
+
 
 def extract_tools_from_content(content):
     tools_pattern = re.compile(r"<tools>\s*(.*?)\s*</tools>", re.DOTALL)
@@ -293,7 +307,8 @@ def extract_tool_calls_from_content(content):
         return ast.literal_eval(tool_calls_str)
     except Exception:
         return json.loads(tool_calls_str)
-    
+
+
 def reasoning_parser(data):
     reasoning_pattern = re.compile(r"<think>\s*(.*?)\s*</think>", re.DOTALL)
     match = reasoning_pattern.search(data)
@@ -302,6 +317,7 @@ def reasoning_parser(data):
     reasoning_str = match.group(1)
     return reasoning_str.strip() if reasoning_str else None
 
+
 def parse_function_calling_json(data):
     parsed_data = {
         "messages": [],
@@ -309,41 +325,71 @@ def parse_function_calling_json(data):
         "extra": None,
     }
     for conversation in data["messages"]:
-        data_role, data_content, data_translated_content = conversation["role"], conversation["content"], conversation.get("translated_content", None)
-        
-        
+        data_role, data_content, data_translated_content = (
+            conversation["role"],
+            conversation["content"],
+            conversation.get("translated_content", None),
+        )
+
         if data_role == "system":
             # print(f"system: {extract_tools_from_content(data_content)}")
 
             tools = []
-            for tool in extract_tools_from_content(data_content):              
-
+            for tool in extract_tools_from_content(data_content):
 
                 if not isinstance(tool, dict):
-                    raise ValueError(f"Tool should be a dictionary, got {type(tool)}: {tool}")
+                    raise ValueError(
+                        f"Tool should be a dictionary, got {type(tool)}: {tool}"
+                    )
                 if "type" in tool and "function" in tool:
                     # type 1 tool definition
-                    tools.append(tool)
+
+                    remaped_tool = {
+                        "type": "function",
+                        "function": {
+                            "name": tool["function"].get("name", ""),
+                            "description": tool["function"].get("description", ""),
+                            "parameters": {
+                                "type": "object",
+                                "properties": tool["function"]["parameters"].get(
+                                    "properties", {}
+                                ),
+                                "required": tool["function"]["parameters"].get(
+                                    "required", []
+                                ),
+                            },
+                        },
+                    }
+                    # tool와 remaped_tool의 diff를 출력
+                    # print(diff(tool, remaped_tool))
+
+                    tools.append(remaped_tool)
                     continue
                 else:
                     # type 2 tool definition
                     if "name" not in tool or "description" not in tool:
-                        raise ValueError(f"Tool must contain 'name' and 'description': {tool}")
-                    
-                    conv_properties, required = type2_tool_definition_conv(tool.get("parameters", {}))
+                        raise ValueError(
+                            f"Tool must contain 'name' and 'description': {tool}"
+                        )
 
-                    tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool["name"],
-                            "description": tool["description"],
-                            "parameters": {
-                                "type": "object",
-                                "properties": conv_properties,
-                                "required": required
-                            }
+                    conv_properties, required = type2_tool_definition_conv(
+                        tool.get("parameters", {})
+                    )
+
+                    tools.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool["name"],
+                                "description": tool["description"],
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": conv_properties,
+                                    "required": required,
+                                },
+                            },
                         }
-                    })
+                    )
 
             parsed_data["tools"] = tools
         elif data_role == "assistant":
@@ -363,26 +409,28 @@ def parse_function_calling_json(data):
                         },
                     }
                 )
-            parsed_data["messages"].append({
-                "role": "assistant",
-                "tool_calls": tool_calls,
-                # "reasoning_content": reasoning_parser(data_translated_content)
-            })
+            parsed_data["messages"].append(
+                {
+                    "role": "assistant",
+                    "tool_calls": tool_calls,
+                    # "reasoning_content": reasoning_parser(data_translated_content)
+                }
+            )
         else:
             # print(f"user: {data_translated_content}")
-            parsed_data["messages"].append({
-                "role": "user",
-                "content": data_translated_content
-            })
-    
+            parsed_data["messages"].append(
+                {"role": "user", "content": data_translated_content}
+            )
+
     # DEBUG!!!
     # print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
 
     return parsed_data
 
+
 input_ds = load_dataset(
-  "exp-models/dolphin-r1-korean-deepseek-toolcalls",
-  data_files="data/*.parquet",
+    "exp-models/dolphin-r1-korean-deepseek-toolcalls",
+    data_files="data/*.parquet",
 )
 
 output = []
@@ -391,6 +439,8 @@ error = []
 for idx, data in enumerate(input_ds["train"]):
     # for dubugging
     # if idx > 200:
+    #     continue
+    # if idx != 10:  # Limit to first 5 for brevity
     #     continue
 
     try:
@@ -418,7 +468,7 @@ output_ds = Dataset.from_pandas(output_df)
 output_file_path = f"./parsed/dolphin-r1-korean-deepseek-non-reasoning.parquet"
 output_ds.to_parquet(output_file_path)
 
-INPUT_DATASET_LENGTH = len(input_ds['train'])
+INPUT_DATASET_LENGTH = len(input_ds["train"])
 OUTPUT_DATASET_LENGTH = len(output_ds)
 
 print(
