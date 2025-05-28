@@ -413,7 +413,7 @@ def parse_function_calling_json(data):
                         },
                         "strict": True,
                     }
-                    # tool와 remaped_tool의 diff를 출력
+                    # tool과 remaped_tool의 diff를 출력
                     diff_result = diff(tool, remaped_tool)
                     if diff_result:
                         logger.info(
@@ -470,7 +470,7 @@ def parse_function_calling_json(data):
                 {
                     "role": "assistant",
                     "tool_calls": tool_calls,
-                    # "reasoning_content": reasoning_parser(data_translated_content)
+                    "reasoning_content": reasoning_parser(data_translated_content),
                 }
             )
         else:
@@ -514,22 +514,43 @@ output_df = pd.DataFrame(output)
 if 1273 in output_df.index:
     output_df = output_df.drop(index=1273)
 
-# for debugging
-# print(output_df.iloc[0].to_json(indent=2))
-
-# Since each tool has different properties, convert to string to meet the requirements of parquet.
+# reasoning_content가 포함된 원본 저장
 output_df["tools"] = output_df["tools"].apply(
     lambda x: json.dumps(x, ensure_ascii=False)
 )
+reasoning_ds = Dataset.from_pandas(output_df)
+output_rfile_path = "./parsed/dolphin-r1-korean-deepseek.parquet"
+reasoning_ds.to_parquet(output_rfile_path)
 
 
-output_ds = Dataset.from_pandas(output_df)
-output_file_path = f"./parsed/dolphin-r1-korean-deepseek-non-reasoning.parquet"
-output_ds.to_parquet(output_file_path)
+# reasoning_content만 제거한 버전 생성 및 저장
+def remove_reasoning_content(messages):
+    new_msgs = []
+    for m in messages:
+        if (
+            isinstance(m, dict)
+            and m.get("role") == "assistant"
+            and "reasoning_content" in m
+        ):
+            m = m.copy()
+            m.pop("reasoning_content", None)
+        new_msgs.append(m)
+    return new_msgs
+
+
+non_reasoning_df = output_df.copy()
+non_reasoning_df["messages"] = non_reasoning_df["messages"].apply(
+    remove_reasoning_content
+)
+non_reasoning_df["tools"] = non_reasoning_df["tools"].apply(
+    lambda x: json.dumps(x, ensure_ascii=False)
+)
+non_reasoning_ds = Dataset.from_pandas(non_reasoning_df)
+output_nrfile_path = "./parsed/dolphin-r1-korean-deepseek-non-reasoning.parquet"
+non_reasoning_ds.to_parquet(output_nrfile_path)
 
 INPUT_DATASET_LENGTH = len(input_ds["train"])
-OUTPUT_DATASET_LENGTH = len(output_ds)
-
+OUTPUT_DATASET_LENGTH = len(output_df)
 print(
-    f"Total lines: {INPUT_DATASET_LENGTH}, Success: {OUTPUT_DATASET_LENGTH}, Error: {INPUT_DATASET_LENGTH - OUTPUT_DATASET_LENGTH}"
+    f"Total lines: {INPUT_DATASET_LENGTH}, Saved: {OUTPUT_DATASET_LENGTH}, Error: {INPUT_DATASET_LENGTH - OUTPUT_DATASET_LENGTH}"
 )
