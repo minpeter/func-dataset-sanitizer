@@ -1,6 +1,7 @@
 import json
 from datasets import Dataset, load_dataset
 import pandas as pd
+from libs.utils import type2_tool_definition_conv
 
 
 def parse_function_calling_json(data):
@@ -20,6 +21,8 @@ def parse_function_calling_json(data):
 
     tools = []
     for tool in json.loads(data["tools"]):
+
+        conv_properties, required = type2_tool_definition_conv(tool["parameters"])
         tools.append(
             {
                 "type": "function",
@@ -27,7 +30,9 @@ def parse_function_calling_json(data):
                     "name": tool["name"],
                     "parameters": {
                         "type": "object",
-                        "properties": tool["parameters"],
+                        "properties": conv_properties,
+                        "required": required,
+                        "additionalProperties": False,
                     },
                 },
             }
