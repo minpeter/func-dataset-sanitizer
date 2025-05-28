@@ -33,6 +33,7 @@ def python_type_to_json_schema(python_type: str, test: str) -> dict:
     Converts a Python type string (like 'List[int]', 'Optional[Dict[str, float]]', etc.)
     to a full JSON Schema (as a dict).
     Covers common broken/partial/unsupported types gracefully.
+    Ensures that for list/array types, 'items': {} is always present.
     """
     # Normalize and patch common broken types
     type_map = {
@@ -120,6 +121,10 @@ def python_type_to_json_schema(python_type: str, test: str) -> dict:
 
     try:
         schema = TypeAdapter(py_type).json_schema()
+        # 반드시 array 타입이면 items: {} 포함
+        if schema.get("type") == "array":
+            if "items" not in schema or not schema["items"]:
+                schema["items"] = {}
         return schema
     except Exception as e:
         logger.warning(f"Schema generation error for '{python_type}': {str(e)}")
@@ -344,6 +349,19 @@ def parse_function_calling_json(data):
                 if "type" in tool and "function" in tool:
                     # type 1 tool definition
 
+                    # SKIP FOR DEBUGGING
+                    continue
+
+                    # properties의 value 중에서 type이 array인데, items 필드가 없는 경우 items: {} 추가
+                    properties = tool["function"]["parameters"].get("properties", {})
+                    for prop_key, prop_val in properties.items():
+                        if (
+                            isinstance(prop_val, dict)
+                            and prop_val.get("type") == "array"
+                            and "items" not in prop_val
+                        ):
+                            prop_val["items"] = {}
+
                     remaped_tool = {
                         "type": "function",
                         "function": {
@@ -351,9 +369,7 @@ def parse_function_calling_json(data):
                             "description": tool["function"].get("description", ""),
                             "parameters": {
                                 "type": "object",
-                                "properties": tool["function"]["parameters"].get(
-                                    "properties", {}
-                                ),
+                                "properties": properties,
                                 "required": tool["function"]["parameters"].get(
                                     "required", []
                                 ),
@@ -361,8 +377,12 @@ def parse_function_calling_json(data):
                         },
                     }
                     # tool와 remaped_tool의 diff를 출력
-                    # print(diff(tool, remaped_tool))
-
+                    diff_result = diff(tool, remaped_tool)
+                    if diff_result:
+                        logger.info(
+                            f"Tool remapping diff: {diff_result} for tool: {tool}"
+                        )
+                        # exit(0)
                     tools.append(remaped_tool)
                     continue
                 else:
