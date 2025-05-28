@@ -97,7 +97,7 @@ def parse_function_calling_json(data):
             parsed_data["messages"].append({
                 "role": "assistant",
                 "tool_calls": tool_calls,
-                # "reasoning_content": reasoning_parser(data_translated_content)
+                "reasoning_content": reasoning_parser(data_translated_content)
             })
         else:
             # print(f"user: {data_translated_content}")
@@ -162,12 +162,23 @@ else:
         error.append({"idx": "DataFrame_to_Dataset", "error": str(e)})
 
 output_jsonl_path = f"./parsed/dolphin-r1-korean-deepseek.jsonl"
-with open(output_jsonl_path, "w", encoding="utf-8") as f:
+output_non_reasoning_jsonl_path = f"./parsed/dolphin-r1-korean-deepseek-non-reasoning.jsonl"
+
+with open(output_jsonl_path, "w", encoding="utf-8") as f_reasoning, \
+     open(output_non_reasoning_jsonl_path, "w", encoding="utf-8") as f_non_reasoning:
     for idx, row in enumerate(output):
         if idx in invalid_indices:
             continue
         try:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            # 저장: reasoning 포함
+            f_reasoning.write(json.dumps(row, ensure_ascii=False) + "\n")
+            # 저장: reasoning 미포함 (reasoning_content 필드 제거)
+            row_non_reasoning = json.loads(json.dumps(row, ensure_ascii=False))
+            if "messages" in row_non_reasoning:
+                for msg in row_non_reasoning["messages"]:
+                    if "reasoning_content" in msg:
+                        del msg["reasoning_content"]
+            f_non_reasoning.write(json.dumps(row_non_reasoning, ensure_ascii=False) + "\n")
         except Exception as e:
             print(f"Row {idx} JSONL 저장 중 에러: {e}")
             error.append({"idx": idx, "error": str(e)})
