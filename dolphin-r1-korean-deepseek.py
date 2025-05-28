@@ -408,8 +408,10 @@ def parse_function_calling_json(data):
                                 "required": tool["function"]["parameters"].get(
                                     "required", []
                                 ),
+                                "additionalProperties": False,
                             },
                         },
+                        "strict": True,
                     }
                     # tool와 remaped_tool의 diff를 출력
                     diff_result = diff(tool, remaped_tool)
