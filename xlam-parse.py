@@ -1,7 +1,7 @@
 import json
 from datasets import Dataset, load_dataset
 import pandas as pd
-from libs.utils import type2_tool_definition_conv
+from libs.xlam_tool_definition_uitls import type2_tool_definition_conv
 
 
 def parse_function_calling_json(data):
