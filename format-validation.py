@@ -6,8 +6,8 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 client = OpenAI(
-    # base_url="https://api.friendli.ai/serverless/v1",
-    # api_key=os.environ.get("FRIENDLI_TOKEN"),
+    base_url="https://api.friendli.ai/serverless/v1",
+    api_key=os.environ.get("FRIENDLI_TOKEN"),
 )
 
 ds = load_dataset("./parsed", data_files="*.parquet")
@@ -21,13 +21,13 @@ total = len(ds["train"]["messages"])
 def process(idx, messages, tools):
     try:
         completion = client.chat.completions.create(
-            # model="meta-llama-3.1-8b-instruct",
-            model="gpt-4o-mini",
+            model="meta-llama-3.1-8b-instruct",
+            # model="gpt-4o-mini",
             messages=messages[:-1],
             # messages=messages,
             tools=json.loads(tools),
-            # max_tokens=1,
-            max_completion_tokens=1,
+            max_tokens=1,
+            # max_completion_tokens=1,
         )
 
         print(completion.choices[0].message)

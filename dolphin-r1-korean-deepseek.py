@@ -147,7 +147,6 @@ def parse_function_calling_json(data):
                                 "additionalProperties": False,
                             },
                         },
-                        "strict": True,
                     }
                     # tool과 remaped_tool의 diff를 출력
                     diff_result = diff(tool, remaped_tool)
@@ -277,9 +276,6 @@ def remove_reasoning_content(messages):
 non_reasoning_df = output_df.copy()
 non_reasoning_df["messages"] = non_reasoning_df["messages"].apply(
     remove_reasoning_content
-)
-non_reasoning_df["tools"] = non_reasoning_df["tools"].apply(
-    lambda x: json.dumps(x, ensure_ascii=False)
 )
 non_reasoning_ds = Dataset.from_pandas(non_reasoning_df)
 output_nrfile_path = "./parsed/dolphin-r1-korean-deepseek-non-reasoning.parquet"
