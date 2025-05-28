@@ -269,7 +269,12 @@ def type2_tool_definition_conv(parameters: dict):
         if "description" in value:
             new_value["description"] = value["description"]
 
-        if "default" in value and json_schema is not None:
+        if (
+            "default" in value
+            and json_schema is not None
+            and value["default"] is not None
+            and value["default"] != ""
+        ):
             cast_value = cast_with_type_str(value["default"], base_type)
             if type(cast_value) != type(value["default"]):
                 logger.info(
