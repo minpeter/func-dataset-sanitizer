@@ -323,6 +323,49 @@ def reasoning_parser(data):
     return reasoning_str.strip() if reasoning_str else None
 
 
+def update_array_type1_json_schema(schema):
+    """
+    Recursively updates a JSON schema dict for type1 tools:
+    - If a property is List[str], deduplicate the list and convert to str if only one element remains.
+    - If an array has 'prefixItems' and 'type' but no 'items', adds 'items': {}.
+    - If an array has neither 'prefixItems' nor 'items', adds 'items': {}.
+    """
+    if isinstance(schema, dict):
+        # First, handle List[str] value deduplication and conversion
+        for key, value in list(schema.items()):
+            # Check if value is a list of strings
+            if isinstance(value, list) and all(isinstance(v, str) for v in value):
+                # Deduplicate
+                deduped = list(dict.fromkeys(value))
+                if len(deduped) < len(value):
+                    schema[key] = deduped
+                # If only one element remains, convert to str
+                if len(deduped) == 1:
+                    schema[key] = deduped[0]
+            elif isinstance(value, dict):
+                update_array_type1_json_schema(value)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        update_array_type1_json_schema(item)
+
+        # Now handle array type schema
+        if (
+            schema.get("type") == "array"
+            or isinstance(schema.get("type"), list)
+            and "array" in schema["type"]
+        ):
+            has_prefix = "prefixItems" in schema
+            has_items = "items" in schema
+            # If prefixItems exists and items does not, add items: {}
+            if has_prefix and not has_items:
+                schema["items"] = {}
+            # If neither prefixItems nor items, add items: {}
+            elif not has_prefix and not has_items:
+                schema["items"] = {}
+    return schema
+
+
 def parse_function_calling_json(data):
     parsed_data = {
         "messages": [],
@@ -349,18 +392,10 @@ def parse_function_calling_json(data):
                 if "type" in tool and "function" in tool:
                     # type 1 tool definition
 
-                    # SKIP FOR DEBUGGING
-                    continue
-
                     # properties의 value 중에서 type이 array인데, items 필드가 없는 경우 items: {} 추가
-                    properties = tool["function"]["parameters"].get("properties", {})
-                    for prop_key, prop_val in properties.items():
-                        if (
-                            isinstance(prop_val, dict)
-                            and prop_val.get("type") == "array"
-                            and "items" not in prop_val
-                        ):
-                            prop_val["items"] = {}
+                    properties = update_array_type1_json_schema(
+                        tool["function"]["parameters"].get("properties", {})
+                    )
 
                     remaped_tool = {
                         "type": "function",
@@ -481,7 +516,9 @@ if 1273 in output_df.index:
 # print(output_df.iloc[0].to_json(indent=2))
 
 # Since each tool has different properties, convert to string to meet the requirements of parquet.
-output_df["tools"] = output_df["tools"].apply(lambda x: json.dumps(x))
+output_df["tools"] = output_df["tools"].apply(
+    lambda x: json.dumps(x, ensure_ascii=False)
+)
 
 
 output_ds = Dataset.from_pandas(output_df)

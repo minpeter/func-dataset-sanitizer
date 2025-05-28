@@ -20,10 +20,6 @@ total = len(ds["train"]["messages"])
 
 def process(idx, messages, tools):
     try:
-        print(f"Index: {idx}")
-        print("Messages:", messages)
-        print("Tools:", json.loads(tools))
-
         completion = client.chat.completions.create(
             # model="meta-llama-3.1-8b-instruct",
             model="gpt-4o-mini",
@@ -41,16 +37,21 @@ def process(idx, messages, tools):
             "Could not finish the message because max_tokens or model output limit was reached."
             in str(e)
         ):
-            print(f"Skipping idx {idx} due to max_tokens error.")
+            # print(f"Skipping idx {idx} due to max_tokens error.")
             return None
         else:
+
+            print(f"Index: {idx}")
+            print("Messages:", messages)
+            print("Tools:", json.loads(tools))
+
             print(f"\033[91mIdx: {idx}, Error: {e}\033[0m")
             return (idx, str(e))
 
 
 print("Starting parallel processing...")
 
-with ThreadPoolExecutor(max_workers=4) as executor:
+with ThreadPoolExecutor(max_workers=16) as executor:
     futures = [
         executor.submit(process, idx, messages, tools)
         for idx, (messages, tools) in enumerate(
